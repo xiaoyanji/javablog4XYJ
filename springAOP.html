@@ -1,0 +1,129 @@
+<!DOCTYPE HTML>
+<html>
+	<head>
+		<title>IT快乐驿站</title>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<link rel="stylesheet" href="assets/css/main.css" />
+	</head>
+	<body>
+
+		<!-- Header -->
+			<header id="header">
+				<a href="index.html" class="title">IT快乐驿站</a>
+				<nav>
+					<ul>
+						<li><a href="index.html">Home</a></li>
+					</ul>
+				</nav>
+			</header>
+		<!-- Wrapper -->
+			<div id="wrapper">
+
+				<!-- Main -->
+					<section id="main" class="wrapper">
+						<div class="inner">
+							<h1 class="major">模拟SpringAop（注解） </h1>
+
+							<!-- Text -->
+								<section>
+									<h2>关于AOP</h2>
+									<blockquote>在软件业，AOP为Aspect Oriented Programming的缩写，意为：面向切面编程，通过预编译方式和运行期动态代理实现程序功能的统一维护的一种技术。利用AOP可以对业务逻辑的各个部分进行隔离，从而使得业务逻辑各部分之间的耦合度降低，提高程序的可重用性，同时提高了开发的效率。</blockquote>
+									<hr />
+									<h3>实现方式</h3>
+									<p>我们使用工厂模式+jdk动态代理+反射+自定义注解模拟spring ioc的工作原理，这里模拟对service方法做事务管理切面，注意设置注解的有效期为runtime</p>
+									<h3>编写注解</h3>
+									<pre><code>package com.myself.annotation;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+
+@Retention(RetentionPolicy.RUNTIME)
+public @interface Transaction {
+}
+</code></pre>
+
+									<h3>编写工厂类，使用反射读取是否含有Transcation注解，如果有就对该方法做代理，使用包装jdbcUtils对其做事务管理</h3>
+									<pre><code>package com.myself.factory;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.util.ResourceBundle;
+import com.myself.annotation.Transaction;
+import com.myself.utils.JdbcUtils;
+
+public class BeanFactory {
+	@SuppressWarnings("all")
+	public static Object getService(Class clazz) throws Exception{
+		ResourceBundle rb = ResourceBundle.getBundle("bean");
+		String name = clazz.getName();
+		String beanName = rb.getString(name);
+		Class<?> beanClass = Class.forName(beanName);
+		final Object bean = beanClass.newInstance();
+		return Proxy.newProxyInstance(BeanFactory.class.getClassLoader(),beanClass.getInterfaces(), new InvocationHandler() {
+			
+			@Override
+			public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+//				Transaction annotation = method.getAnnotation(Transaction.class);
+//				System.out.println(annotation);
+//				Annotation[] annotations = method.getAnnotations();
+//				System.out.println(annotations.length);
+				Object result=null;
+				boolean flag = method.isAnnotationPresent(Transaction.class);
+				if(flag ){
+					try{
+						JdbcUtils.startTx();
+						result = method.invoke(bean, args);
+						JdbcUtils.endTX();
+						return result;
+					}catch(Exception e){
+						JdbcUtils.rollBack();
+						e.printStackTrace();
+						throw new RuntimeException(e);
+					}
+				}
+				return method.invoke(bean, args);
+			}
+		});
+	}
+}</code></pre>
+
+									<h3>测试注解</h3>
+									<pre><code>public class UserServiceImpl extends BaseDaoImpl<User> implements UserService {
+
+	UserDao userDao = new UserDaoImpl();
+	
+	@Override
+	@Transaction
+	public boolean addUser(User[] users) throws Exception {
+		userDao.addUser(users[0]);
+//		int i = 1/0;
+		userDao.addUser(users[1]);
+		
+		return false;
+	}
+	
+}</code></pre>
+								</section>
+
+			</div>
+
+		<!-- Footer -->
+			<footer id="footer" class="wrapper alt">
+				<div class="inner">
+					<ul class="menu">
+						<li>&copy; Untitled. All rights reserved.</li><li>More Templates <a href="http://www.cssmoban.com/" target="_blank" title="模板之家">模板之家</a> - Collect from <a href="http://www.cssmoban.com/" title="网页模板" target="_blank">网页模板</a></li>
+					</ul>
+				</div>
+			</footer>
+
+		<!-- Scripts -->
+			<script src="assets/js/jquery.min.js"></script>
+			<script src="assets/js/jquery.scrollex.min.js"></script>
+			<script src="assets/js/jquery.scrolly.min.js"></script>
+			<script src="assets/js/skel.min.js"></script>
+			<script src="assets/js/util.js"></script>
+			<!--[if lte IE 8]><script src="assets/js/ie/respond.min.js"></script><![endif]-->
+			<script src="assets/js/main.js"></script>
+
+	</body>
+</html>

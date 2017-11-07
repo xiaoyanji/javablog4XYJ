@@ -1,0 +1,176 @@
+<!DOCTYPE HTML>
+<!--
+	Hyperspace by HTML5 UP
+	html5up.net | @n33co
+	Free for personal and commercial use under the CCA 3.0 license (html5up.net/license)
+-->
+<html>
+	<head>
+		<title>IT快乐驿站</title>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<!--[if lte IE 8]><script src="assets/js/ie/html5shiv.js"></script><![endif]-->
+		<link rel="stylesheet" href="assets/css/main.css" />
+		<!--[if lte IE 9]><link rel="stylesheet" href="assets/css/ie9.css" /><![endif]-->
+		<!--[if lte IE 8]><link rel="stylesheet" href="assets/css/ie8.css" /><![endif]-->
+	</head>
+	<body>
+
+		<!-- Header -->
+			<header id="header">
+				<a href="index.html" class="title">IT快乐驿站</a>
+				<nav>
+					<ul>
+						<li><a href="index.html">Home</a></li>
+					</ul>
+				</nav>
+			</header>
+
+		<!-- Wrapper -->
+			<div id="wrapper">
+
+				<!-- Main -->
+					<section id="main" class="wrapper">
+						<div class="inner">
+							<h1 class="major">java模拟Spring IOC（xml）</h1>
+
+							<!-- Text -->
+								<section>
+									<h2>关于IOC</h2>
+									<blockquote>IoC模式，系统中通过引入实现了IoC模式的IoC容器，即可由IoC容器来管理对象的生命周期、依赖关系等，从而使得应用程序的配置和依赖性规范与实际的应用程序代码分开。其中一个特点就是通过文本的配置文件进行应用程序组件间相互关系的配置，而不用重新修改并编译具体的代码。</blockquote>
+									<hr />
+									<h3>实现方式</h3>
+									<p>我们使用工厂模式+反射+xml模拟spring ioc的工作原理</p>
+									<h3>准备bean.xml,配置xml数据</h3>
+									<pre><code>&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;beans&gt;
+	&lt;bean id="UserDao" class="com.mytest_mall.dao.impl.UserDaoImpl"&gt;
+		&lt;property name="qr" ref="TxQueryRunner"/&gt;
+		&lt;!-- &lt;property name="xxxx" value="xxx"/&gt; --&gt;
+	&lt;/bean&gt;
+	&lt;bean id="UserService" class="com.mytest_mall.service.impl.UserServiceImpl"&gt;
+		&lt;property name="uDao" ref="UserDao"/&gt;
+	&lt;/bean&gt;
+	&lt;bean id="TxQueryRunner" class="com.mytest_mall.utils.TxQueryRunner"/&gt;
+&lt;/beans&gt;</code></pre>
+
+									<h3>我们使用map模拟Spring的容器，通过dom4j+xpath的xml读取技术读取xml内容，利用反射获取类对象，对成员属性注入</h3>
+									<pre><code>package com.mytest_mall.utils;
+import java.lang.reflect.Field;
+import java.util.HashMap;
+import java.util.List;
+import org.dom4j.Attribute;
+import org.dom4j.Document;
+import org.dom4j.DocumentException;
+import org.dom4j.Element;
+import org.dom4j.io.SAXReader;
+
+public class BeanFactory {
+	private static Document document;
+	private static HashMap<String,Object> beanMap =new HashMap<String,Object>();
+	
+	static{
+		try {
+			SAXReader reader = new SAXReader();
+			document = reader.read(BeanFactory.class.getClassLoader().getResourceAsStream("applications.xml"));
+			initMap();
+//			System.out.println(beanMap);
+		} catch (DocumentException e) {
+			e.printStackTrace();
+		}
+	}
+	
+	public static<T> T getBean(Class<T> t){
+		String name = t.getSimpleName();
+		return (T) beanMap.get(name);
+	}
+	
+	
+	private static void initMap(){
+		List<Attribute> ids = document.selectNodes("//bean/@id");
+		for (Attribute id : ids) {
+			getInstance(id.getValue());
+		}
+	}
+	
+	private static Object getInstance(String name){
+		try {
+			if(beanMap.containsKey(name)){
+				return beanMap.get(name);
+			}
+			Element bean = (Element) document.selectSingleNode("//bean[@id='"+name+"']");
+			String beanClass = bean.attributeValue("class");
+			Class<?> clazz = Class.forName(beanClass);
+			Object obj = clazz.newInstance();
+			List<Element> elements = bean.elements();
+			if(elements.size()==0){
+				beanMap.put(name, obj);
+			}else{
+				for (Element e : elements) {
+					String ename = e.attributeValue("name");
+					Field field = clazz.getDeclaredField(ename);
+					field.setAccessible(true);
+					String value = e.attributeValue("value");
+					if(value != null){
+						field.set(obj, value);
+					}else{
+						field.set(obj, getInstance(e.attributeValue("ref")));
+					}
+					beanMap.put(name, obj);
+				}
+			}
+			return obj;
+		} catch (Exception e) {
+			e.printStackTrace();
+			throw new RuntimeException();
+		}
+	}
+}
+</code></pre>
+
+									<h3>测试数据,注入成功</h3>
+									<pre><code>public class UserDaoImpl implements UserDao{
+	QueryRunner qr;
+	
+	@Override
+	public User findByUsername(String username) throws Exception {
+		String sql = "select * from user where username = ?";
+		return qr.query(sql, new BeanHandler<User>(User.class),username);
+	}
+	···	
+}
+···
+public class UserServiceImpl implements UserService {
+	UserDao uDao ;
+
+	@Override
+	public User findByUsername(String username) throws Exception {
+
+		return uDao.findByUsername(username);
+	}
+	...	
+}</code></pre>
+								</section>
+
+			</div>
+
+		<!-- Footer -->
+			<footer id="footer" class="wrapper alt">
+				<div class="inner">
+					<ul class="menu">
+						<li>&copy; Untitled. All rights reserved.</li><li>More Templates <a href="http://www.cssmoban.com/" target="_blank" title="模板之家">模板之家</a> - Collect from <a href="http://www.cssmoban.com/" title="网页模板" target="_blank">网页模板</a></li>
+					</ul>
+				</div>
+			</footer>
+
+		<!-- Scripts -->
+			<script src="assets/js/jquery.min.js"></script>
+			<script src="assets/js/jquery.scrollex.min.js"></script>
+			<script src="assets/js/jquery.scrolly.min.js"></script>
+			<script src="assets/js/skel.min.js"></script>
+			<script src="assets/js/util.js"></script>
+			<!--[if lte IE 8]><script src="assets/js/ie/respond.min.js"></script><![endif]-->
+			<script src="assets/js/main.js"></script>
+
+	</body>
+</html>

@@ -1,0 +1,298 @@
+<!DOCTYPE HTML>
+<html>
+	<head>
+		<title>IT快乐驿站</title>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<link rel="stylesheet" href="assets/css/main.css" />
+		<style type="text/css">
+			.image.fit img {
+			    width: 60%;
+			}
+		</style>
+	</head>
+	<body>
+
+		<!-- Header -->
+			<header id="header">
+				<a href="index.html" class="title">IT快乐驿站</a>
+				<nav>
+					<ul>
+						<li><a href="index.html">Home</a></li>
+					</ul>
+				</nav>
+			</header>
+
+		<!-- Wrapper -->
+			<div id="wrapper">
+
+				<!-- Main -->
+					<section id="main" class="wrapper">
+						<div class="inner">
+							<h1 class="major">SpringMvc 源码剖析</h1>
+
+							<!-- Text -->
+								<section>
+									<h3>spring mvc</h3>
+									<blockquote>Spring MVC属于SpringFrameWork的后续产品，已经融合在Spring Web Flow里面。Spring 框架提供了构建 Web 应用程序的全功能 MVC 模块。使用 Spring 可插入的 MVC 架构，从而在使用Spring进行WEB开发时，可以选择使用Spring的SpringMVC框架或集成其他MVC开发框架。
+									</blockquote>
+									<p>在使用过程中，一般比较疑惑的是映射处理，以及视图数据的封装，因此我们在跟踪的时候主要分析这两个地方。</p>
+									<h3>源码解析</h3>
+									<p>spring mvc是基于servlet实现请求拦截，因此在使用Spring mvc时，首先需要在web.xml中配置servlet，我们从这里开始跟踪。</p>
+									<div class="12u$"><span class="image fit"><img src="images/dispatcher.png" width="" alt="" /></span></div>
+									<h3>1.handlerMapping</h3>
+									<p>找到servlet的doService方法。从这里找到doDispatch(request, response);这是springmvc前端处理器的核心部分。在doDispatch(request, response),我们通过getHandler(processedRequest)获取一个handler，进入该方法。发现此方法对于我们获取handler意义不大略过，继续跟进</p>
+									<pre><code>protected void doService(HttpServletRequest request, HttpServletResponse response) throws Exception {
+	...
+	try {
+		doDispatch(request, response);
+	}
+	...
+}
+...										
+protected void doDispatch(HttpServletRequest request, HttpServletResponse response) throws Exception {
+	...
+	mappedHandler = getHandler(processedRequest);
+	...
+}
+...
+protected HandlerExecutionChain getHandler(HttpServletRequest request) throws Exception {
+	for (HandlerMapping hm : this.handlerMappings) {
+		if (logger.isTraceEnabled()) {
+			logger.trace(
+					"Testing handler map [" + hm + "] in DispatcherServlet with name '" + getServletName() + "'");
+		}
+		HandlerExecutionChain handler = hm.getHandler(request);
+		if (handler != null) {
+			return handler;
+		}
+	}
+	return null;
+}
+									</code></pre>
+									
+									<p>我们发现此方法并没有真正执行getHandler的逻辑，而是做了预处理,但是通过getHandlerExecutionChain(handler, request)将获取的handler在外围包裹了一层拦截器，有兴趣的小伙伴可以深入跟进此方法。
+										我们继续跟进getHandlerInternal(request)方法，此时我们发现点击后为抽象方法，没有具体实现。但是想到我们在使用springmvc时，配置了一个处理器引射器对象，对开继承树寻找。</p>
+									<pre><code>public final HandlerExecutionChain getHandler(HttpServletRequest request) throws Exception {
+	Object handler = getHandlerInternal(request);
+	if (handler == null) {
+		handler = getDefaultHandler();
+	}
+	if (handler == null) {
+		return null;
+	}
+	// Bean name or resolved handler?
+	if (handler instanceof String) {
+		String handlerName = (String) handler;
+		handler = getApplicationContext().getBean(handlerName);
+	}
+
+	HandlerExecutionChain executionChain = getHandlerExecutionChain(handler, request);
+	if (CorsUtils.isCorsRequest(request)) {
+		CorsConfiguration globalConfig = this.corsConfigSource.getCorsConfiguration(request);
+		CorsConfiguration handlerConfig = getCorsConfiguration(handler, request);
+		CorsConfiguration config = (globalConfig != null ? globalConfig.combine(handlerConfig) : handlerConfig);
+		executionChain = getCorsHandlerExecutionChain(request, executionChain, config);
+	}
+}									
+
+protected abstract Object getHandlerInternal(HttpServletRequest request) throws Exception;
+									</code></pre>
+									
+									
+									<div class="12u$"><span class="image fit"><img src="images/mapping.png"  /></span></div>
+									<p>我们找到我们使用的是AbstractHandlerMethodMapping跟进此方法的getHandlerInternal，我们发现此时该方法,先根据request获取到lookupPath（匹配），再调用lookupHandlerMethod获取处理方法，继续跟进。在lookupHandlerMethod中，通过传入的path调用getMappingsByUrl获取匹配数据，
+										根据匹配数据返回一个handlerMethod。mapping结束，当然mapping的深层代码小伙伴如果有兴趣可以继续跟进。</p>
+									<pre><code>protected HandlerMethod getHandlerInternal(HttpServletRequest request) throws Exception {
+	String lookupPath = getUrlPathHelper().getLookupPathForRequest(request);
+	...
+	HandlerMethod handlerMethod = lookupHandlerMethod(lookupPath, request);
+	...
+}
+...
+protected HandlerMethod lookupHandlerMethod(String lookupPath, HttpServletRequest request) throws Exception {
+	List<Match> matches = new ArrayList<Match>();
+	List<T> directPathMatches = this.mappingRegistry.getMappingsByUrl(lookupPath);
+	if (directPathMatches != null) {
+		addMatchingMappings(directPathMatches, matches, request);
+	}
+	if (matches.isEmpty()) {
+		// No choice but to go through all mappings...
+		addMatchingMappings(this.mappingRegistry.getMappings().keySet(), matches, request);
+	}
+	if (!matches.isEmpty()) {
+		Comparator<Match> comparator = new MatchComparator(getMappingComparator(request));
+		Collections.sort(matches, comparator);
+		if (logger.isTraceEnabled()) {
+		logger.trace("Found " + matches.size() + " matching mapping(s) for [" +
+		lookupPath + "] : " + matches);
+		}
+		Match bestMatch = matches.get(0);
+		if (matches.size() > 1) {
+			if (CorsUtils.isPreFlightRequest(request)) {
+				return PREFLIGHT_AMBIGUOUS_MATCH;
+			}
+			Match secondBestMatch = matches.get(1);
+			if (comparator.compare(bestMatch, secondBestMatch) == 0) {
+				Method m1 = bestMatch.handlerMethod.getMethod();
+				Method m2 = secondBestMatch.handlerMethod.getMethod();
+				throw new IllegalStateException("Ambiguous handler methods mapped for HTTP path '" +
+					request.getRequestURL() + "': {" + m1 + ", " + m2 + "}");
+			}
+		}
+		handleMatch(bestMatch.mapping, lookupPath, request);
+		return bestMatch.handlerMethod;
+	}
+	else {
+		return handleNoMatch(this.mappingRegistry.getMappings().keySet(), lookupPath, request);
+	}
+}
+									</code></pre>
+									<p>适配器HandlerAdapter获取，通过handler匹配我们配置的所有适配器，找到对应的即可</p>
+									<pre><code>protected void doDispatch(HttpServletRequest request, HttpServletResponse response) throws Exception {
+	...
+	mappedHandler = getHandler(processedRequest);
+	...
+}
+...										
+protected HandlerAdapter getHandlerAdapter(Object handler) throws ServletException {
+	for (HandlerAdapter ha : this.handlerAdapters) {
+		if (logger.isTraceEnabled()) {
+			logger.trace("Testing handler adapter [" + ha + "]");
+		}
+		if (ha.supports(handler)) {
+			return ha;
+		}
+	}
+	throw new ServletException("No adapter for handler [" + handler +
+			"]: The DispatcherServlet configuration needs to include a HandlerAdapter that supports this handler");
+}
+									</code></pre>
+									
+									<h3>2.视图解析器的渲染</h3>
+									<p>执行完handler之后返回ModelAndView，进行交由视图解析器处理，跟进此方法。该方法先内部先处理数据ModelAndview完整与合法，如果通过，调用render(mv, request, response)解析视图，跟进。</p>
+									<pre><code>protected void doDispatch(HttpServletRequest request, HttpServletResponse response) throws Exception {
+	...
+	processDispatchResult(processedRequest, response, mappedHandler, mv, dispatchException);
+	...
+}
+...
+private void processDispatchResult(HttpServletRequest request, HttpServletResponse response,
+			HandlerExecutionChain mappedHandler, ModelAndView mv, Exception exception) throws Exception {
+	...
+		if (mv != null && !mv.wasCleared()) {
+			render(mv, request, response);
+			if (errorView) {
+				WebUtils.clearErrorRequestAttributes(request);
+			}
+		}
+	...
+	}
+									</code></pre>
+									
+									<p>进入此方法，通过传入的的逻辑视图获取物理视图view = mv.getView()，在将model数据填充到物理视图view.render(mv.getModelInternal(), request, response)，跟进render方法，发现是接口，我们通过继承树结合配置的视图解析器找到
+									jsp的视图InternalResourceView</p>
+									<div class="12u$"><span class="image fit"><img src="images/view.png" width="" alt="" /></span></div>
+									<pre><code>protected void render(ModelAndView mv, HttpServletRequest request, HttpServletResponse response) throws Exception {
+	...
+	else {
+		// No need to lookup: the ModelAndView object contains the actual View object.
+		view = mv.getView();
+		if (view == null) {
+			throw new ServletException("ModelAndView [" + mv + "] neither contains a view name nor a " +
+					"View object in servlet with name '" + getServletName() + "'");
+		}
+	}
+	...
+	try {
+		if (mv.getStatus() != null) {
+			response.setStatus(mv.getStatus().value());
+		}
+		view.render(mv.getModelInternal(), request, response);
+	}
+	...
+}
+									</code></pre>
+									
+									<p>从父类开始找render方法，在AbstractView中找到render方法，发现调用了renderMergedOutputModel渲染视图，跟进发现是抽象方法，因此去子类中找实现方法</p>
+									<pre><code>protected void render(ModelAndView mv, HttpServletRequest request, HttpServletResponse response) throws Exception {
+	...
+	else {
+		// No need to lookup: the ModelAndView object contains the actual View object.
+		view = mv.getView();
+		if (view == null) {
+			throw new ServletException("ModelAndView [" + mv + "] neither contains a view name nor a " +
+					"View object in servlet with name '" + getServletName() + "'");
+		}
+	}
+	...
+	try {
+		if (mv.getStatus() != null) {
+			response.setStatus(mv.getStatus().value());
+		}
+		view.render(mv.getModelInternal(), request, response);
+	}
+	...
+}
+									</code></pre>
+									
+									<p>进入InternalResourceView找到该方法，发现其调用exposeModelAsRequestAttributes去执行数据的填充，跟进方法。在这个方法中，
+									我们很明显看到他将model中的数据田中到了request域中，然后jsp通过编译即可将数据填充到视图。</p>
+									<pre><code>protected void renderMergedOutputModel(
+	Map model, HttpServletRequest request, HttpServletResponse response) throws Exception {
+	// Expose the model object as request attributes.
+	exposeModelAsRequestAttributes(model, request);
+	...
+}
+...
+protected void exposeModelAsRequestAttributes(Map model, HttpServletRequest request) throws Exception {
+	for (Map.Entry entry : model.entrySet()) {
+		String modelName = entry.getKey();
+		Object modelValue = entry.getValue();
+		if (modelValue != null) {
+			request.setAttribute(modelName, modelValue);
+			if (logger.isDebugEnabled()) {
+				logger.debug("Added model object '" + modelName + "' of type [" + modelValue.getClass().getName() +
+						"] to request in view with name '" + getBeanName() + "'");
+			}
+		}
+		else {
+			request.removeAttribute(modelName);
+			if (logger.isDebugEnabled()) {
+				logger.debug("Removed model object '" + modelName +
+						"' from request in view with name '" + getBeanName() + "'");
+			}
+		}
+	}
+}
+									</code></pre>
+								</section>
+									
+								</section>
+
+
+						</div>
+					</section>
+
+			</div>
+
+		<!-- Footer -->
+			<footer id="footer" class="wrapper alt">
+				<div class="inner">
+					<ul class="menu">
+						<li>&copy; Untitled. All rights reserved.</li><li>感谢<a href="http://www.cssmoban.com/" target="_blank" title="模板之家">模板之家</a>提供的html5模板 </li>
+					</ul>
+				</div>
+			</footer>
+
+		<!-- Scripts -->
+			<script src="assets/js/jquery.min.js"></script>
+			<script src="assets/js/jquery.scrollex.min.js"></script>
+			<script src="assets/js/jquery.scrolly.min.js"></script>
+			<script src="assets/js/skel.min.js"></script>
+			<script src="assets/js/util.js"></script>
+			<!--[if lte IE 8]><script src="assets/js/ie/respond.min.js"></script><![endif]-->
+			<script src="assets/js/main.js"></script>
+
+	</body>
+</html>
